@@ -1,13 +1,462 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<title>TEST</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rounds Roguelite Arena</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            background-color: #1a1a24;
+            color: #ffffff;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        h1 {
+            margin-bottom: 10px;
+            font-size: 24px;
+            letter-spacing: 2px;
+            color: #3498db;
+        }
+        canvas {
+            background-color: #2c3e50;
+            border: 4px solid #34495e;
+            box-shadow: 0px 10px 30px rgba(0,0,0,0.5);
+            border-radius: 4px;
+            cursor: crosshair;
+        }
+        .instructions {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #bdc3c7;
+            text-align: center;
+            max-width: 800px;
+            line-height: 1.4;
+        }
+    </style>
 </head>
 <body>
-<input type="number" id="userInput" placeholder="type a number">
-<button id="submitBtn">Submit</button>
-<p id="display"></p>
-<script src="app.js"> defer
-</script>
+
+    <h1>ROUNDS: ROGUELITE EDITION</h1>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    
+    <div class="instructions">
+        <strong>Controls:</strong> Move with <strong>W, A, S, D</strong> | Aim with <strong>Mouse</strong> | Shoot with <strong>Left Click</strong> <br>
+        Win matches to draft card upgrades. Defeat level 5 to complete the run. Persistent currency saves automatically.
+    </div>
+
+    <script>
+    // =========================================================================
+    // SECTION 2: GLOBAL STATE, CARDS, & STORAGE ARCHITECTURE
+    // =========================================================================
+    const GameState = {
+      LOBBY: 'LOBBY',
+      MATCH: 'MATCH',
+      DRAFT: 'DRAFT',
+      GAME_OVER: 'GAME_OVER'
+    };
+
+    const gState = {
+      current: GameState.LOBBY,
+      currency: 0,
+      currentRound: 1,
+      wins: 0,
+      losses: 0,
+      maxRounds: 5,
+      frameCount: 0,
+      draftOptions: [],
+      arenaWidth: 800,
+      arenaHeight: 600
+    };
+
+    const CARD_DATABASE = {
+      BIG_BULLETS: { name: "Big Bullets", dmg: 1.5, size: 2.0, speed: 0.8, hp: 1.0, fireRate: 1.0, bnc: 0, pierce: 0, lifesteal: 0, regen: 0 },
+      FAST_FIRE:  { name: "Rapid Fire", dmg: 0.7, size: 0.8, speed: 1.2, hp: 1.0, fireRate: 0.5, bnc: 0, pierce: 0, lifesteal: 0, regen: 0 },
+      SPEEDSTER:  { name: "Speedster", dmg: 1.0, size: 1.0, speed: 1.4, hp: 0.8, fireRate: 1.0, bnc: 0, pierce: 0, lifesteal: 0, regen: 0 },
+      TANK:       { name: "Juggernaut", dmg: 1.1, size: 1.3, speed: 0.7, hp: 1.6, fireRate: 1.2, bnc: 0, pierce: 0, lifesteal: 0, regen: 0 },
+      GLASS_CAN:  { name: "Glass Cannon", dmg: 2.0, size: 1.0, speed: 1.1, hp: 0.4, fireRate: 0.9, bnc: 0, pierce: 0, lifesteal: 0, regen: 0 },
+      BOUNCY:     { name: "Bouncy Bullets", dmg: 0.9, size: 1.0, speed: 1.0, hp: 1.0, fireRate: 1.0, bnc: 2, pierce: 0, lifesteal: 0, regen: 0 },
+      SNIPER:     { name: "Sniper", dmg: 1.6, size: 1.1, speed: 1.8, hp: 1.0, fireRate: 1.5, bnc: 0, pierce: 1, lifesteal: 0, regen: 0 },
+      VAMP:       { name: "Vampirism", dmg: 0.8, size: 1.0, speed: 1.0, hp: 1.0, fireRate: 1.0, bnc: 0, pierce: 0, lifesteal: 0.15, regen: 0 },
+      REGEN:      { name: "Nano-Regen", dmg: 0.9, size: 1.0, speed: 0.9, hp: 1.1, fireRate: 1.0, bnc: 0, pierce: 0, lifesteal: 0, regen: 0.05 },
+      PIERCE:     { name: "Railgun Ammo", dmg: 0.8, size: 0.9, speed: 2.0, hp: 1.0, fireRate: 1.1, bnc: 0, pierce: 3, lifesteal: 0, regen: 0 },
+      MINI_GUN:   { name: "Minigun", dmg: 0.4, size: 0.6, speed: 1.1, hp: 1.0, fireRate: 0.3, bnc: 0, pierce: 0, lifesteal: 0, regen: 0 },
+      POISON:     { name: "Toxic Bullets", dmg: 1.2, size: 1.0, speed: 0.9, hp: 1.0, fireRate: 1.1, bnc: 0, pierce: 0, lifesteal: 0, regen: 0 }, 
+      SHIELD:     { name: "Energy Shield", dmg: 0.9, size: 1.0, speed: 1.0, hp: 1.3, fireRate: 1.0, bnc: 0, pierce: 0, lifesteal: 0, regen: 0 },
+      HEAVY:      { name: "Heavy Metal", dmg: 1.4, size: 1.5, speed: 0.8, hp: 1.2, fireRate: 1.3, bnc: 0, pierce: 0, lifesteal: 0, regen: 0 },
+      LIGHT:      { name: "Light Weight", dmg: 0.8, size: 0.8, speed: 1.3, hp: 0.9, fireRate: 0.8, bnc: 0, pierce: 0, lifesteal: 0, regen: 0 },
+      BURST:      { name: "Burst Module", dmg: 0.9, size: 0.9, speed: 1.2, hp: 1.0, fireRate: 0.7, bnc: 0, pierce: 0, lifesteal: 0, regen: 0 },
+      STEALTH:    { name: "Ghost Frame", dmg: 1.0, size: 0.9, speed: 1.2, hp: 0.9, fireRate: 1.0, bnc: 1, pierce: 0, lifesteal: 0, regen: 0 },
+      CRIT:       { name: "Lucky Shot", dmg: 1.3, size: 1.0, speed: 1.0, hp: 1.0, fireRate: 1.0, bnc: 0, pierce: 0, lifesteal: 0, regen: 0 },
+      FROST:      { name: "Frost Core", dmg: 1.0, size: 1.0, speed: 0.9, hp: 1.1, fireRate: 1.0, bnc: 0, pierce: 0, lifesteal: 0, regen: 0 },
+      FLAME:      { name: "Inferno Base", dmg: 1.2, size: 1.2, speed: 1.0, hp: 1.0, fireRate: 1.2, bnc: 0, pierce: 0, lifesteal: 0, regen: 0 },
+      SONIC:      { name: "Sonic Wave", dmg: 0.7, size: 1.8, speed: 2.2, hp: 0.8, fireRate: 1.4, bnc: 0, pierce: 2, lifesteal: 0, regen: 0 },
+      TITAN:      { name: "Titanium Alloy", dmg: 1.0, size: 1.1, speed: 0.8, hp: 1.8, fireRate: 1.3, bnc: 0, pierce: 0, lifesteal: 0, regen: 0 },
+      BERSERK:    { name: "Berserker", dmg: 1.5, size: 1.1, speed: 1.1, hp: 0.7, fireRate: 0.8, bnc: 0, pierce: 0, lifesteal: 0.05, regen: 0 },
+      SHADOW:     { name: "Shadow Step", dmg: 1.0, size: 0.9, speed: 1.3, hp: 1.0, fireRate: 0.9, bnc: 0, pierce: 0, lifesteal: 0, regen: 0.02 },
+      OVERLOAD:   { name: "Overload System", dmg: 1.7, size: 1.3, speed: 1.0, hp: 1.0, fireRate: 0.6, bnc: 0, pierce: 0, lifesteal: 0, regen: -0.01 }
+    };
+
+    function loadPersistentCurrency() {
+      const saved = localStorage.getItem('rounds_roguelite_currency');
+      const savedWins = localStorage.getItem('rounds_roguelite_wins');
+      const savedLosses = localStorage.getItem('rounds_roguelite_losses');
+      if (saved !== null) gState.currency = parseInt(saved, 10);
+      if (savedWins !== null) gState.wins = parseInt(savedWins, 10);
+      if (savedLosses !== null) gState.losses = parseInt(savedLosses, 10);
+    }
+
+    function savePersistentCurrency() {
+      localStorage.setItem('rounds_roguelite_currency', gState.currency);
+      localStorage.setItem('rounds_roguelite_wins', gState.wins);
+      localStorage.setItem('rounds_roguelite_losses', gState.losses);
+    }
+    // =========================================================================
+    // SECTION 3: OBJECT POOLING ENGINE & INPUTS
+    // =========================================================================
+    class PooledBullet {
+      constructor() {
+        this.active = false;
+        this.x = 0;
+        this.y = 0;
+        this.vx = 0;
+        this.vy = 0;
+        this.radius = 5;
+        this.damage = 10;
+        this.bouncesLeft = 0;
+        this.pierceLeft = 0;
+        this.isEnemy = false;
+      }
+
+      spawn(x, y, vx, vy, radius, damage, bounces, pierce, isEnemy) {
+        this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+        this.radius = radius; this.damage = damage;
+        this.bouncesLeft = bounces; this.pierceLeft = pierce;
+        this.isEnemy = isEnemy; this.active = true;
+      }
+
+      update(width, height) {
+        if (!this.active) return;
+        this.x += this.vx; this.y += this.vy;
+
+        if (this.x - this.radius < 0 || this.x + this.radius > width) {
+          if (this.bouncesLeft > 0) { this.vx *= -1; this.bouncesLeft--; } else { this.active = false; }
+        }
+        if (this.y - this.radius < 0 || this.y + this.radius > height) {
+          if (this.bouncesLeft > 0) { this.vy *= -1; this.bouncesLeft--; } else { this.active = false; }
+        }
+      }
+    }
+
+    class BulletPoolManager {
+      constructor(size = 300) {
+        this.pool = Array.from({ length: size }, () => new PooledBullet());
+      }
+      fetch(x, y, vx, vy, radius, damage, bounces, pierce, isEnemy) {
+        const b = this.pool.find(bullet => !bullet.active);
+        if (b) b.spawn(x, y, vx, vy, radius, damage, bounces, pierce, isEnemy);
+      }
+      update(width, height) {
+        for (let i = 0; i < this.pool.length; i++) this.pool[i].update(width, height);
+      }
+      clear() {
+        for (let i = 0; i < this.pool.length; i++) this.pool[i].active = false;
+      }
+    }
+
+    const bulletPool = new BulletPoolManager();
+
+    class InputTracker {
+      constructor(canvas) {
+        this.keys = {};
+        this.mouse = { x: 0, y: 0, isDown: false, clickedThisFrame: false };
+        window.addEventListener('keydown', (e) => { this.keys[e.key.toLowerCase()] = true; });
+        window.addEventListener('keyup', (e) => { this.keys[e.key.toLowerCase()] = false; });
+        canvas.addEventListener('mousemove', (e) => {
+          const rect = canvas.getBoundingClientRect();
+          this.mouse.x = e.clientX - rect.left; this.mouse.y = e.clientY - rect.top;
+        });
+        canvas.addEventListener('mousedown', () => { this.mouse.isDown = true; this.mouse.clickedThisFrame = true; });
+        canvas.addEventListener('mouseup', () => { this.mouse.isDown = false; });
+      }
+      clearFrame() { this.mouse.clickedThisFrame = false; }
+      isIntersecting(mx, my, bounds) {
+        return mx >= bounds.x && mx <= bounds.x + bounds.w && my >= bounds.y && my <= bounds.y + bounds.h;
+      }
+    }
+    // =========================================================================
+    // SECTION 4: BASE ENTITY PROPERTIES & CALCULATED MODIFIERS
+    // =========================================================================
+    class BaseCharacter {
+      constructor(x, y, color) {
+        this.x = x; this.y = y; this.radius = 18; this.color = color;
+        this.baseHp = 100; this.maxHp = 100; this.hp = 100;
+        this.baseSpeed = 3.5; this.speed = 3.5; this.angle = 0;
+        this.baseDmg = 15; this.damage = 15; this.bulletRadius = 5; this.bulletSpeed = 8;
+        this.fireCooldown = 0; this.baseFireInterval = 25; this.fireInterval = 25;
+        this.bounces = 0; this.pierce = 0; this.lifesteal = 0; this.regenRate = 0;
+        this.activeCards = [];
+      }
+
+      resetStats() {
+        this.maxHp = this.baseHp; this.speed = this.baseSpeed; this.damage = this.baseDmg;
+        this.bulletRadius = 5; this.bulletSpeed = 8; this.fireInterval = this.baseFireInterval;
+        this.bounces = 0; this.pierce = 0; this.lifesteal = 0; this.regenRate = 0;
+
+        this.activeCards.forEach(card => {
+          this.damage *= card.dmg; this.bulletRadius *= card.size; this.bulletSpeed *= card.speed;
+          this.maxHp *= card.hp; this.fireInterval *= card.fireRate; this.bounces += card.bnc;
+          this.pierce += card.pierce; this.lifesteal += card.lifesteal; this.regenRate += card.regen;
+        });
+        this.hp = Math.min(this.hp, this.maxHp);
+      }
+
+      takeDamage(amount) {
+        this.hp -= amount;
+        if (this.hp < 0) this.hp = 0;
+      }
+
+      processRegen() {
+        if (this.hp > 0 && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.regenRate);
+      }
+
+      shoot(pool, isEnemy) {
+        if (this.fireCooldown <= 0) {
+          const vx = Math.cos(this.angle) * this.bulletSpeed;
+          const vy = Math.sin(this.angle) * this.bulletSpeed;
+          pool.fetch(this.x, this.y, vx, vy, this.bulletRadius, this.damage, this.bounces, this.pierce, isEnemy);
+          this.fireCooldown = this.fireInterval;
+        }
+      }
+
+      tickCooldowns() { if (this.fireCooldown > 0) this.fireCooldown--; }
+
+      clampToArena(w, h) {
+        if (this.x - this.radius < 0) this.x = this.radius;
+        if (this.x + this.radius > w) this.x = w - this.radius;
+        if (this.y - this.radius < 0) this.y = this.radius;
+        if (this.y + this.radius > h) this.y = h - this.radius;
+      }
+    }
+    // =========================================================================
+    // SECTION 5: TACTICAL PROGRESSIVE AI (LEVELS 1 - 20)
+    // =========================================================================
+    class AdaptiveEnemyAI extends BaseCharacter {
+      constructor(x, y, level) {
+        super(x, y, '#e74c3c');
+        this.level = Math.min(20, Math.max(1, level)); 
+        this.targetVx = 0; this.targetVy = 0;
+        this.applyLevelScaling();
+      }
+
+      applyLevelScaling() {
+        const scalingFactor = 1 + (this.level - 1) * 0.12;
+        this.baseHp *= scalingFactor;
+        this.baseDmg *= (1 + (this.level - 1) * 0.08);
+        this.baseSpeed += (this.level - 1) * 0.15;
+        this.baseFireInterval = Math.max(6, this.baseFireInterval - (this.level - 1) * 1.2);
+        this.resetStats();
+        this.hp = this.maxHp;
+      }
+
+      think(player, frameCount) {
+        if (frameCount % 6 !== 0) return;
+        const dx = player.x - this.x; const dy = player.y - this.y; const dist = Math.hypot(dx, dy);
+
+        if (this.level <= 4) {
+          if (Math.random() < 0.3) {
+            const randAngle = Math.random() * Math.PI * 2;
+            this.targetVx = Math.cos(randAngle) * this.speed; this.targetVy = Math.sin(randAngle) * this.speed;
+          }
+          this.angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.9;
+        } 
+        else if (this.level <= 12) {
+          this.angle = Math.atan2(dy, dx);
+          if (dist > 220) {
+            this.targetVx = (dx / dist) * this.speed; this.targetVy = (dy / dist) * this.speed;
+          } else if (dist < 100) {
+            this.targetVx = -(dx / dist) * this.speed; this.targetVy = -(dy / dist) * this.speed;
+          } else {
+            this.targetVx = 0; this.targetVy = 0;
+          }
+        } 
+        else {
+          let pVx = 0, pVy = 0;
+          if (gInput.keys['w']) pVy -= player.speed; if (gInput.keys['s']) pVy += player.speed;
+          if (gInput.keys['a']) pVx -= player.speed; if (gInput.keys['d']) pVx += player.speed;
+
+          const travelTime = dist / this.bulletSpeed;
+          const predX = player.x + pVx * travelTime; const predY = player.y + pVy * travelTime;
+          this.angle = Math.atan2(predY - this.y, predX - this.x);
+
+          const flankAngle = Math.atan2(dy, dx) + Math.PI / 2;
+          if (dist > 150) {
+            this.targetVx = ((dx / dist) * 0.5 + Math.cos(flankAngle) * 0.5) * this.speed;
+            this.targetVy = ((dy / dist) * 0.5 + Math.sin(flankAngle) * 0.5) * this.speed;
+          } else {
+            this.targetVx = (-(dx / dist) * 0.6 + Math.cos(flankAngle) * 0.4) * this.speed;
+            this.targetVy = (-(dy / dist) * 0.6 + Math.sin(flankAngle) * 0.4) * this.speed;
+          }
+        }
+      }
+
+      executeMovement(w, h) {
+        this.x += this.targetVx; this.y += this.targetVy;
+        this.clampToArena(w, h);
+      }
+    }
+    // =========================================================================
+    // SECTION 6: SYSTEM ORCHESTRATION & COLLISION DETECTION
+    // =========================================================================
+    let canvas, ctx, gInput, player, enemy;
+    const uiBounds = {
+      playBtn: { x: 325, y: 350, w: 150, h: 50 },
+      cards: [{ x: 80, y: 220, w: 180, h: 260 }, { x: 310, y: 220, w: 180, h: 260 }, { x: 540, y: 220, w: 180, h: 260 }]
+    };
+
+    function initGame() {
+      canvas = document.getElementById('gameCanvas'); ctx = canvas.getContext('2d'); gInput = new InputTracker(canvas);
+      loadPersistentCurrency(); player = new BaseCharacter(150, 300, '#3498db'); generateMatch();
+      gState.current = GameState.LOBBY; requestAnimationFrame(runEngineLoop);
+    }
+
+    function generateMatch() {
+      bulletPool.clear(); player.x = 150; player.y = 300; player.resetStats(); player.hp = player.maxHp;
+      enemy = new AdaptiveEnemyAI(650, 300, gState.currentRound);
+    }
+
+    function processDraftOptions() {
+      const keys = Object.keys(CARD_DATABASE); const selected = [];
+      while (selected.length < 3) {
+        const k = keys[Math.floor(Math.random() * keys.length)];
+        if (!selected.includes(k)) selected.push(k);
+      }
+      gState.draftOptions = selected;
+    }
+
+    function checkCollisions() {
+      bulletPool.pool.forEach(b => {
+        if (!b.active) return;
+        if (!b.isEnemy) {
+          if (Math.hypot(b.x - enemy.x, b.y - enemy.y) < b.radius + enemy.radius) {
+            enemy.takeDamage(b.damage);
+            if (player.lifesteal > 0) player.hp = Math.min(player.maxHp, player.hp + b.damage * player.lifesteal);
+            if (b.pierceLeft > 0) b.pierceLeft--; else b.active = false;
+          }
+        } else {
+          if (Math.hypot(b.x - player.x, b.y - player.y) < b.radius + player.radius) {
+            player.takeDamage(b.damage);
+            if (b.pierceLeft > 0) b.pierceLeft--; else b.active = false;
+          }
+        }
+      });
+
+      if (player.hp <= 0) {
+        gState.losses++; gState.currency += 5; gState.currentRound = 1; player.activeCards = [];
+        savePersistentCurrency(); gState.current = GameState.LOBBY;
+      } else if (enemy.hp <= 0) {
+        gState.wins++; gState.currency += 25; savePersistentCurrency();
+        if (gState.currentRound >= gState.maxRounds) { gState.current = GameState.GAME_OVER; } 
+        else { processDraftOptions(); gState.current = GameState.DRAFT; }
+      }
+    }
+    // =========================================================================
+    // SECTION 7: SIMULATION TICKING, HUD RENDERER & LAUNCH
+    // =========================================================================
+    function updateSimulation() {
+      gState.frameCount++;
+      if (gState.current === GameState.MATCH) {
+        let mx = 0, my = 0;
+        if (gInput.keys['w']) my -= 1; if (gInput.keys['s']) my += 1;
+        if (gInput.keys['a']) mx -= 1; if (gInput.keys['d']) mx += 1;
+        if (mx !== 0 && my !== 0) { mx *= 0.7071; my *= 0.7071; }
+        
+        player.x += mx * player.speed; player.y += my * player.speed;
+        player.angle = Math.atan2(gInput.mouse.y - player.y, gInput.mouse.x - player.x);
+        player.clampToArena(gState.arenaWidth, gState.arenaHeight);
+        if (gInput.mouse.isDown) player.shoot(bulletPool, false);
+        player.tickCooldowns(); player.processRegen();
+
+        enemy.think(player, gState.frameCount); enemy.executeMovement(gState.arenaWidth, gState.arenaHeight);
+        enemy.shoot(bulletPool, true); enemy.tickCooldowns(); enemy.processRegen();
+        bulletPool.update(gState.arenaWidth, gState.arenaHeight); checkCollisions();
+      } 
+      else if (gState.current === GameState.LOBBY || gState.current === GameState.GAME_OVER) {
+        if (gInput.mouse.clickedThisFrame && gInput.isIntersecting(gInput.mouse.x, gInput.mouse.y, uiBounds.playBtn)) {
+          gState.currentRound = 1; player.activeCards = []; generateMatch(); gState.current = GameState.MATCH;
+        }
+      } 
+      else if (gState.current === GameState.DRAFT) {
+        if (gInput.mouse.clickedThisFrame) {
+          for (let i = 0; i < 3; i++) {
+            if (gInput.isIntersecting(gInput.mouse.x, gInput.mouse.y, uiBounds.cards[i])) {
+              player.activeCards.push(CARD_DATABASE[gState.draftOptions[i]]);
+              gState.currentRound++; generateMatch(); gState.current = GameState.MATCH; break;
+            }
+          }
+        }
+      }
+    }
+
+    function drawInterface() {
+      ctx.fillStyle = '#2c3e50'; ctx.fillRect(0, 0, gState.arenaWidth, gState.arenaHeight);
+
+      if (gState.current === GameState.MATCH) {
+        ctx.fillStyle = player.color; ctx.beginPath(); ctx.arc(player.x, player.y, player.radius, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = enemy.color; ctx.beginPath(); ctx.arc(enemy.x, enemy.y, enemy.radius, 0, Math.PI*2); ctx.fill();
+
+        bulletPool.pool.forEach(b => {
+          if (!b.active) return;
+          ctx.fillStyle = b.isEnemy ? '#e74c3c' : '#f1c40f'; ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI*2); ctx.fill();
+        });
+
+        ctx.fillStyle = '#ffffff'; ctx.font = '16px monospace'; ctx.textAlign = 'left';
+        ctx.fillText(`Round: ${gState.currentRound}/${gState.maxRounds} | AI Level: ${enemy.level}`, 20, 30);
+        ctx.fillText(`Player HP: ${Math.ceil(player.hp)}/${Math.ceil(player.maxHp)}`, 20, 55);
+        ctx.fillText(`Enemy HP: ${Math.ceil(enemy.hp)}/${Math.ceil(enemy.maxHp)}`, 580, 30);
+      } 
+      else if (gState.current === GameState.LOBBY || gState.current === GameState.GAME_OVER) {
+        ctx.fillStyle = '#ffffff'; ctx.font = '32px monospace'; ctx.textAlign = 'center';
+        ctx.fillText(gState.current === GameState.GAME_OVER ? "VICTORY! RUN COMPLETE" : "ROUNDS ROGUELITE ARENA", 400, 150);
+        
+        ctx.font = '18px monospace';
+        ctx.fillText(`Saved Tokens: $${gState.currency}`, 400, 210);
+        ctx.fillText(`Career Record - Wins: ${gState.wins} | Losses: ${gState.losses}`, 400, 240);
+
+        ctx.fillStyle = '#2ecc71'; ctx.fillRect(uiBounds.playBtn.x, uiBounds.playBtn.y, uiBounds.playBtn.w, uiBounds.playBtn.h);
+        ctx.fillStyle = '#ffffff'; ctx.font = '18px monospace'; ctx.fillText("PLAY RUN", 400, 380);
+      } 
+      else if (gState.current === GameState.DRAFT) {
+        ctx.fillStyle = '#ffffff'; ctx.font = '24px monospace'; ctx.textAlign = 'center';
+        ctx.fillText("SELECT A POWER MODIFIER CARD", 400, 100);
+        
+        for (let i = 0; i < 3; i++) {
+          const b = uiBounds.cards[i]; const cardData = CARD_DATABASE[gState.draftOptions[i]];
+          ctx.fillStyle = '#34495e'; ctx.fillRect(b.x, b.y, b.w, b.h);
+          ctx.strokeStyle = '#3498db'; ctx.lineWidth = 3; ctx.strokeRect(b.x, b.y, b.w, b.h);
+          ctx.fillStyle = '#ffffff'; ctx.font = '14px monospace'; ctx.fillText(cardData.name, b.x + b.w/2, b.y + 40);
+          ctx.font = '11px monospace';
+          ctx.fillText(`Damage: x${cardData.dmg}`, b.x + b.w/2, b.y + 100);
+          ctx.fillText(`Fire Rate: x${cardData.fireRate}`, b.x + b.w/2, b.y + 130);
+          ctx.fillText(`Max HP: x${cardData.hp}`, b.x + b.w/2, b.y + 160);
+        }
+      }
+    }
+
+    function runEngineLoop() {
+      updateSimulation(); drawInterface(); gInput.clearFrame(); requestAnimationFrame(runEngineLoop);
+    }
+
+    window.onload = initGame;
+    </script>
 </body>
 </html>
