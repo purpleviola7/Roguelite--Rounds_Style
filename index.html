@@ -51,7 +51,7 @@
     
     <div class="instructions">
         <strong>Controls:</strong> Move with <strong>A, D</strong> | Jump with <strong>W or Space</strong> | Aim with <strong>Mouse</strong> | Shoot with <strong>Left Click</strong> <br>
-        Platforms block movement but projectiles slice through them. Fight through 5 evolving AI tiers.
+        Platforms block movement and projectiles will collapse or bounce off them. Fight through 20 scaling AI levels.
     </div>
 
     <script>
@@ -71,18 +71,28 @@
       draftOptions: [],
       arenaWidth: 800,
       arenaHeight: 600,
-      gravity: 0.4,       // Platformer constant falling acceleration
-      friction: 0.85      // Lateral velocity bleed factor
+      gravity: 0.38,       // Slightly lower gravity for better hangtime
+      friction: 0.85      
     };
 
-    // Environment map platforms setup (Bounding layout)
+    // Complex layout: 11 smaller platforms across the map
     const platforms = [
-      { x: 0, y: 560, w: 800, h: 40 },   // Ground platform floor
-      { x: 100, y: 420, w: 200, h: 20 },  // Left low platform
-      { x: 500, y: 420, w: 200, h: 20 },  // Right low platform
-      { x: 250, y: 280, w: 300, h: 20 },  // Center mid platform
-      { x: 150, y: 150, w: 150, h: 20 },  // Left top ledge
-      { x: 500, y: 150, w: 150, h: 20 }   // Right top ledge
+      { x: 0, y: 575, w: 800, h: 25 },    // Ground floor
+      // Lower Tier
+      { x: 60, y: 460, w: 140, h: 15 },   
+      { x: 330, y: 460, w: 140, h: 15 },  
+      { x: 600, y: 460, w: 140, h: 15 },  
+      // Mid Tier Lower
+      { x: 190, y: 360, w: 120, h: 15 },  
+      { x: 490, y: 360, w: 120, h: 15 },  
+      // Center Tower Mid
+      { x: 350, y: 270, w: 100, h: 15 },  
+      // Mid Tier Higher
+      { x: 90, y: 220, w: 120, h: 15 },   
+      { x: 590, y: 220, w: 120, h: 15 },  
+      // Top Tier Ledges
+      { x: 220, y: 130, w: 100, h: 15 },  
+      { x: 480, y: 130, w: 100, h: 15 }   
     ];
 
     const CARD_DATABASE = {
@@ -128,12 +138,12 @@
       localStorage.setItem('plat_rogue_losses', gState.losses);
     }
     // =========================================================================
-    // SECTION 3: RECYCLING PROJECTILE POOLS & CANVAS COORDINATE MAPPERS
+    // SECTION 3: BULLET PHYSICS POOLING ENGINE & CANVAS COORDINATE MAPPERS
     // =========================================================================
     class PooledBullet {
       constructor() {
         this.active = false; this.x = 0; this.y = 0; this.vx = 0; this.vy = 0;
-        this.radius = 5; this.damage = 10; this.bouncesLeft = 0; this.pierceLeft = 0; this.isEnemy = false;
+        this.radius = 3; this.damage = 10; this.bouncesLeft = 0; this.pierceLeft = 0; this.isEnemy = false;
       }
 
       spawn(x, y, vx, vy, radius, damage, bounces, pierce, isEnemy) {
@@ -145,14 +155,44 @@
 
       update(width, height) {
         if (!this.active) return;
-        this.x += this.vx; this.y += this.vy;
+        
+        // Bullet Physics: Projectiles drop down naturally due to gravity limits
+        this.vy += gState.gravity * 0.25; 
+        
+        this.x += this.vx; 
+        this.y += this.vy;
 
-        // Level boundary bounce collision processing
+        // Platform Solid Geometric Collisions Check Loop
+        for (let i = 0; i < platforms.length; i++) {
+          const plat = platforms[i];
+          if (this.x + this.radius > plat.x && this.x - this.radius < plat.x + plat.w &&
+              this.y + this.radius > plat.y && this.y - this.radius < plat.y + plat.h) {
+            
+            if (this.bouncesLeft > 0) {
+              const fromLeft = this.x - this.vx <= plat.x;
+              const fromRight = this.x - this.vx >= plat.x + plat.w;
+              const fromTop = this.y - this.vy <= plat.y;
+              
+              if (fromLeft || fromRight) {
+                this.vx *= -0.9;
+              } else if (fromTop || this.y - this.vy >= plat.y + plat.h) {
+                this.vy *= -0.9;
+              }
+              this.bouncesLeft--;
+              break; 
+            } else {
+              this.active = false; 
+              return;
+            }
+          }
+        }
+
+        // Screen boundary collisions
         if (this.x - this.radius < 0 || this.x + this.radius > width) {
-          if (this.bouncesLeft > 0) { this.vx *= -1; this.bouncesLeft--; } else { this.active = false; }
+          if (this.bouncesLeft > 0) { this.vx *= -0.9; this.bouncesLeft--; } else { this.active = false; }
         }
         if (this.y - this.radius < 0 || this.y + this.radius > height) {
-          if (this.bouncesLeft > 0) { this.vy *= -1; this.bouncesLeft--; } else { this.active = false; }
+          if (this.bouncesLeft > 0) { this.vy *= -0.9; this.bouncesLeft--; } else { this.active = false; }
         }
       }
     }
@@ -198,19 +238,24 @@
     class BaseCharacter {
       constructor(x, y, color) {
         this.x = x; this.y = y; this.vx = 0; this.vy = 0;
-        this.radius = 16; this.color = color;
+        this.radius = 10; // Scaled down from 16
+        this.color = color;
         this.baseHp = 100; this.maxHp = 100; this.hp = 100;
-        this.accel = 0.6; this.jumpForce = -9.5; this.maxSpeed = 4.5;
+        this.accel = 0.55; 
+        this.jumpForce = -10.8; // Higher jump velocity (Up from -9.5)
+        this.maxSpeed = 4.2;
         this.angle = 0; this.grounded = false;
 
-        this.baseDmg = 15; this.damage = 15; this.bulletRadius = 5; this.bulletSpeed = 9;
+        this.baseDmg = 15; this.damage = 15; 
+        this.bulletRadius = 3; // Scaled down from 5
+        this.bulletSpeed = 9;
         this.fireCooldown = 0; this.baseFireInterval = 25; this.fireInterval = 25;
         this.bounces = 0; this.pierce = 0; this.lifesteal = 0; this.regenRate = 0;
         this.activeCards = [];
       }
 
       resetStats() {
-        this.maxHp = this.baseHp; this.damage = this.baseDmg; this.bulletRadius = 5;
+        this.maxHp = this.baseHp; this.damage = this.baseDmg; this.bulletRadius = 3;
         this.bulletSpeed = 9; this.fireInterval = this.baseFireInterval;
         this.bounces = 0; this.pierce = 0; this.lifesteal = 0; this.regenRate = 0;
 
@@ -223,17 +268,15 @@
       }
 
       applyPhysicsUpdate() {
-        this.vy += gState.gravity; // Continuous downward drag
-        this.vx *= gState.friction; // Side slip deceleration
+        this.vy += gState.gravity; 
+        this.vx *= gState.friction; 
 
         this.x += this.vx;
         this.y += this.vy;
         this.grounded = false;
 
-        // AABB Solid platform landing loop constraints
         platforms.forEach(plat => {
           if (this.x + this.radius > plat.x && this.x - this.radius < plat.x + plat.w) {
-            // Is character falling downward through the surface point?
             if (this.y + this.radius >= plat.y && this.y - this.radius < plat.y && this.vy > 0) {
               this.y = plat.y - this.radius;
               this.vy = 0;
@@ -242,7 +285,6 @@
           }
         });
 
-        // Stage screen horizontal constraints
         if (this.x - this.radius < 0) { this.x = this.radius; this.vx = 0; }
         if (this.x + this.radius > gState.arenaWidth) { this.x = gState.arenaWidth - this.radius; this.vx = 0; }
       }
@@ -257,8 +299,10 @@
 
       shoot(pool, isEnemy) {
         if (this.fireCooldown <= 0) {
-          const vx = Math.cos(this.angle) * this.bulletSpeed;
-          const vy = Math.sin(this.angle) * this.bulletSpeed;
+          // Momentum Inheritance: Projectiles inherit a ratio of movement velocity
+          const vx = (Math.cos(this.angle) * this.bulletSpeed) + (this.vx * 0.5);
+          const vy = (Math.sin(this.angle) * this.bulletSpeed) + (this.vy * 0.3);
+          
           pool.fetch(this.x, this.y, vx, vy, this.bulletRadius, this.damage, this.bounces, this.pierce, isEnemy);
           this.fireCooldown = this.fireInterval;
         }
@@ -277,6 +321,7 @@
       }
 
       applyLevelScaling() {
+        // AI difficulty mechanics and equations remain identical
         const scalingFactor = 1 + (this.level - 1) * 0.12;
         this.baseHp *= scalingFactor;
         this.baseDmg *= (1 + (this.level - 1) * 0.08);
@@ -291,41 +336,34 @@
         const dy = player.y - this.y;
         const dist = Math.hypot(dx, dy);
 
-        // Angle update running frame independently for ultra fluid targeting line
         this.angle = Math.atan2(dy, dx);
 
-        if (frameCount % 6 !== 0) return; // Throttled movement path updates
+        if (frameCount % 6 !== 0) return; 
 
         if (this.level <= 4) {
-          // Level 1-4: Sloppy random patrolled navigation walk cycles
           if (Math.random() < 0.15) {
             this.vx += (Math.random() - 0.5) * this.maxSpeed;
           }
-          if (Math.random() < 0.05 && this.grounded) {
+          if (Math.random() < 0.07 && this.grounded) {
             this.vy = this.jumpForce;
           }
         } 
         else if (this.level <= 12) {
-          // Level 5-12: Directly tracks targets horizontally across platforms
-          if (dx > 30) this.vx = Math.min(this.maxSpeed, this.vx + this.accel);
-          else if (dx < -30) this.vx = Math.max(-this.maxSpeed, this.vx - this.accel);
+          if (dx > 25) this.vx = Math.min(this.maxSpeed, this.vx + this.accel);
+          else if (dx < -25) this.vx = Math.max(-this.maxSpeed, this.vx - this.accel);
 
-          // Jump if target is higher or AI hits an edge barrier block
-          if ((dy < -60 || Math.random() < 0.02) && this.grounded) {
+          if ((dy < -45 || Math.random() < 0.03) && this.grounded) {
             this.vy = this.jumpForce;
           }
         } 
         else {
-          // Level 13-20: Advanced line-of-sight tracking and defensive jumps
-          if (dx > 200) this.vx = Math.min(this.maxSpeed, this.vx + this.accel * 1.3);
-          else if (dx < -200) this.vx = Math.max(-this.maxSpeed, this.vx - this.accel * 1.3);
+          if (dx > 160) this.vx = Math.min(this.maxSpeed, this.vx + this.accel * 1.3);
+          else if (dx < -160) this.vx = Math.max(-this.maxSpeed, this.vx - this.accel * 1.3);
           else {
-            // Reposition backwards to keep spatial mid-range advantage
             this.vx += dx > 0 ? -this.accel : this.accel;
           }
 
-          // Jump logic if target shoots or is vertical
-          if ((dy < -40 || Math.abs(this.vx) < 0.2) && this.grounded && Math.random() < 0.4) {
+          if ((dy < -35 || Math.abs(this.vx) < 0.2) && this.grounded && Math.random() < 0.4) {
             this.vy = this.jumpForce;
           }
         }
@@ -394,11 +432,9 @@
     function updateSimulation() {
       gState.frameCount++;
       if (gState.current === GameState.MATCH) {
-        // Player Action Input Checks (A/D horizontal walking vectors)
         if (gInput.keys['a']) player.vx = Math.max(-player.maxSpeed, player.vx - player.accel);
         if (gInput.keys['d']) player.vx = Math.min(player.maxSpeed, player.vx + player.accel);
         
-        // Jumping processing triggers
         if ((gInput.keys['w'] || gInput.keys[' ']) && player.grounded) {
           player.vy = player.jumpForce;
           player.grounded = false;
@@ -409,7 +445,6 @@
         if (gInput.mouse.isDown) player.shoot(bulletPool, false);
         player.tickCooldowns(); player.processRegen();
 
-        // Engine automation logic processing loop updates
         enemy.thinkAndMove(player, gState.frameCount);
         enemy.applyPhysicsUpdate();
         if (Math.random() < 0.07) enemy.shoot(bulletPool, true);
@@ -438,15 +473,12 @@
       ctx.fillStyle = '#1e1e24'; ctx.fillRect(0, 0, gState.arenaWidth, gState.arenaHeight);
 
       if (gState.current === GameState.MATCH) {
-        // Draw Solid Level Platforms
         ctx.fillStyle = '#4a4a5a';
         platforms.forEach(plat => ctx.fillRect(plat.x, plat.y, plat.w, plat.h));
 
-        // Draw Player & Enemy Circles
         ctx.fillStyle = player.color; ctx.beginPath(); ctx.arc(player.x, player.y, player.radius, 0, Math.PI*2); ctx.fill();
         ctx.fillStyle = enemy.color; ctx.beginPath(); ctx.arc(enemy.x, enemy.y, enemy.radius, 0, Math.PI*2); ctx.fill();
 
-        // Projectile Pool Rendering updates
         bulletPool.pool.forEach(b => {
           if (!b.active) return;
           ctx.fillStyle = b.isEnemy ? '#e74c3c' : '#f1c40f'; ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI*2); ctx.fill();
